@@ -67,6 +67,7 @@ import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.ChatFormatting;
+import net.minecraft.SharedConstants;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.RegistryFriendlyByteBuf;
@@ -1162,9 +1163,43 @@ public class Flashback implements ModInitializer, ClientModInitializer {
         return gameRules;
     }
 
+    private static @Nullable FlashbackMeta probeReplayMetadata(Path path) {
+        if (!path.toString().endsWith(".zip")) {
+            return null;
+        }
+        try (FileSystem fs = FileSystems.newFileSystem(path)) {
+            Path metadataPath = fs.getPath("/metadata.json");
+            if (!Files.exists(metadataPath)) {
+                return null;
+            }
+            JsonObject metadataJson = new Gson().fromJson(Files.readString(metadataPath), JsonObject.class);
+            return FlashbackMeta.fromJson(metadataJson);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public static void openReplayWorld(Path path) {
-        // Disconnect
         Minecraft minecraft = Minecraft.getInstance();
+
+        // Refuse replays recorded under a different protocol version — packet
+        // wire formats don't match and the decode crashes mid-load. The replay
+        // browser hides these, but drag-and-drop and recent-replay paths don't.
+        FlashbackMeta probeMetadata = probeReplayMetadata(path);
+        if (probeMetadata != null && probeMetadata.protocolVersion != 0
+                && probeMetadata.protocolVersion != SharedConstants.getProtocolVersion()) {
+            String recorded = probeMetadata.versionString != null
+                ? probeMetadata.versionString : "protocol " + probeMetadata.protocolVersion;
+            String current = FabricLoader.getInstance().getRawGameVersion();
+            Flashback.LOGGER.error("Refusing to load replay {}: recorded on {} (protocol {}), current is {} (protocol {})",
+                path, recorded, probeMetadata.protocolVersion, current, SharedConstants.getProtocolVersion());
+            SystemToast.add(minecraft.gui.toastManager(), FlashbackSystemToasts.RECORDING_TOAST,
+                Component.translatable("flashback.toast.incompatible_replay"),
+                Component.translatable("flashback.toast.incompatible_replay_description", recorded, current));
+            return;
+        }
+
+        // Disconnect
         if (minecraft.level != null) {
             minecraft.level.disconnect(Component.empty());
         }

@@ -123,6 +123,8 @@
   "flashback.mark_command.not_recording": "Not recording",
   "flashback.toast.already_recording": "Already Recording",
   "flashback.toast.already_recording_description": "Cannot start new recording when already recording",
+  "flashback.toast.incompatible_replay": "Unable to open replay",
+  "flashback.toast.incompatible_replay_description": "Replay was created in %s and is incompatible with %s",
   "flashback.flashback": "Flashback",
   "flashback.toast.started_recording": "Started recording",
   "flashback.toast.paused_recording": "Paused recording",
