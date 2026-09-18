@@ -1,4 +1,4 @@
-param([switch]$PrepareOnly, [string]$ArtifactPath, [string]$Scenario = 'smoke', [string]$ReplayPath)
+param([switch]$PrepareOnly, [string]$ArtifactPath, [string]$Scenario = 'smoke', [string]$ReplayPath, [switch]$CompatTest)
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
 if (-not $ArtifactPath) { $ArtifactPath = Join-Path $projectRoot ('artifacts/client-' + $Scenario + '-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff')) }
@@ -57,6 +57,7 @@ try {
     try {
         $extraArgs = @()
         if ($ReplayPath) { $extraArgs += "-PflashbackReplayPath=$ReplayPath" }
+        if ($CompatTest) { $extraArgs += "-PflashbackCompatTest=true" }
         & (Join-Path $projectRoot 'gradlew.bat') exportTestLaunches "-PflashbackClientScenario=$Scenario" "-PflashbackClientRunDir=$clientPath" "-PflashbackLaunchExportDir=$artifactPath" @extraArgs --console=plain *>&1 |
             Tee-Object -FilePath (Join-Path $artifactPath 'export.log')
     } finally {
@@ -67,7 +68,7 @@ try {
     $metadata.status='RUNNING'
     $metadata | ConvertTo-Json | Set-Content (Join-Path $artifactPath 'result.json')
     $client = Start-TestProcess 'client'
-    $timeoutSeconds = if ($Scenario -eq 'replay') { 600 } else { 240 }
+    $timeoutSeconds = if ($Scenario -eq 'replay' -or $Scenario -eq 'export') { 600 } else { 240 }
     $deadline = [DateTime]::UtcNow.AddSeconds($timeoutSeconds)
     while (!$client.process.HasExited -and [DateTime]::UtcNow -lt $deadline) {
         Start-Sleep -Milliseconds 500
@@ -84,6 +85,10 @@ try {
         if ($clientLog -notmatch 'HIDDEN_REPLAY_KEYBIND') { throw 'Missing keybind behavioral assertion' }
         if (!(Test-Path -LiteralPath (Join-Path $clientPath 'hidden-replay-editor.png'))) { throw 'Missing replay editor evidence' }
         if (!(Test-Path -LiteralPath (Join-Path $clientPath 'hidden-replay.png'))) { throw 'Missing client rendering evidence' }
+    } elseif ($Scenario -eq 'export') {
+        if ($clientLog -notmatch 'HIDDEN_EXPORT_PASS') { throw 'Missing export completion' }
+        if (!(Test-Path -LiteralPath (Join-Path $clientPath 'export-test.mp4'))) { throw 'Missing exported video' }
+        if (!(Test-Path -LiteralPath (Join-Path $clientPath 'hidden-export.png'))) { throw 'Missing client rendering evidence' }
     } else {
         if ($clientLog -notmatch "HIDDEN_CLIENT_PASS scenario=$Scenario") { throw 'Missing hidden-client completion' }
         if (!(Test-Path -LiteralPath (Join-Path $clientPath "hidden-$Scenario.png"))) { throw 'Missing client rendering evidence' }

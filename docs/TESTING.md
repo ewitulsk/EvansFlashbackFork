@@ -9,6 +9,9 @@ hidden, unfocused processes — no desktop mouse/keyboard automation, no window 
 scripts/Test-ClientSmoke.ps1                    # smoke scenario (default)
 scripts/Test-ClientSmoke.ps1 -Scenario editor   # editor/render pipeline probe
 scripts/Test-ClientSmoke.ps1 -Scenario replay -ReplayPath <path\to\replay.zip>
+scripts/Test-ClientSmoke.ps1 -Scenario editordepth -ReplayPath <path\to\replay.zip>
+scripts/Test-ClientSmoke.ps1 -Scenario export -ReplayPath <path\to\replay.zip>
+scripts/Test-ClientSmoke.ps1 -Scenario record -ReplayPath <path\to\replay.zip>
 ```
 
 Each run creates a project-owned artifact directory under `artifacts/` containing the
@@ -58,6 +61,22 @@ directory (options, logs, screenshots), a source manifest with SHA-256 hashes, a
   → `ReplayServer.replayPaused` toggles (`HIDDEN_REPLAY_KEYBIND`). Then reads
   `ReplayUI.compositeOnTop` back through `copyTextureToBuffer`, asserts ≥5000
   drawn pixels, writes `hidden-replay-editor.png`, logs `HIDDEN_REPLAY_PASS`.
+- `editordepth` — opens a replay, waits for the editor, then drives the editor
+  machinery through the real keyboard path: `I`/`O` export markers
+  (`HIDDEN_DEPTH_MARKERS`), a camera keyframe track applied through
+  `EditorState.applyKeyframes` verified by player movement
+  (`HIDDEN_DEPTH_KEYFRAME`), RightArrow timeline scrubbing
+  (`HIDDEN_DEPTH_SCRUB`), and a scene-history `setKeyframe` reverted via the
+  `Ctrl+Z` → `Keybinds.UNDO` → `editorScene.undo` chain (`HIDDEN_DEPTH_UNDO`).
+  Logs `HIDDEN_DEPTH_PASS`.
+- `export` — opens a replay, runs a real `ExportJob` (MP4/H264 via ffmpeg +
+  AAC audio through the SOFTLoopback capture path, which exercises
+  `MixinAudioLibrary`'s `alcCreateContext` wrap), asserts a non-empty output
+  file, logs `HIDDEN_EXPORT_PASS`.
+- `record` — opens a replay, starts `Flashback.RECORDER` during live playback
+  so real replay packets flow through the recording path, finishes with
+  quicksave, asserts a valid replay zip (metadata, `c0.flashback`,
+  `level_chunk_caches`), logs `HIDDEN_RECORD_PASS`.
 
 New scenarios select via `-PflashbackClientScenario=<name>`; unknown names fail fast.
 

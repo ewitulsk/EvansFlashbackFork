@@ -17,7 +17,7 @@ import org.spongepowered.asm.mixin.injection.At;
 @Mixin(targets = {"net.caffeinemc.mods.sodium.client.render.chunk.DefaultChunkRenderer", "me.jellysquid.mods.sodium.client.render.chunk.DefaultChunkRenderer"}, remap = false)
 public abstract class MixinSodiumChunkRenderer {
 
-    @WrapOperation(method = "render", require = 0, remap = false, at = @At(value = "FIELD", target = "Lnet/caffeinemc/mods/sodium/client/gui/SodiumOptions$PerformanceSettings;useBlockFaceCulling:Z", opcode = Opcodes.GETFIELD, remap = false))
+    @WrapOperation(method = "getCameraTranslation", require = 0, remap = false, at = @At(value = "FIELD", target = "Lnet/caffeinemc/mods/sodium/client/gui/SodiumOptions$PerformanceSettings;useBlockFaceCulling:Z", opcode = Opcodes.GETFIELD, remap = false))
     private boolean render_useBlockFaceCulling(SodiumOptions.PerformanceSettings instance, Operation<Boolean> original) {
         ExportJob exportJob = Flashback.EXPORT_JOB;
         if (exportJob != null && exportJob.getSettings().projection() == ExportProjection.ORTHOGRAPHIC) {

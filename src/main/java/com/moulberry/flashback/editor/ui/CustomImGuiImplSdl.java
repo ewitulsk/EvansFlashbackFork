@@ -87,6 +87,7 @@ public class CustomImGuiImplSdl {
 
     private MouseHandledBy grabbed = null;
     private int ignoreMouseMovements = 0;
+
     private boolean releasedAllKeysBecauseOfDialog = false;
     private boolean releasedAllKeysBecauseOfDisable = false;
     private double grabbedOriginalMouseX;
@@ -339,6 +340,19 @@ public class CustomImGuiImplSdl {
         io.addKeyEvent(ImGuiKey.ModSuper, (mod & SDL_KMOD_GUI) != 0);
     }
 
+    /**
+     * Release all modifier keys via AddKeyEvent only. Never use io.setKeyXxx
+     * here — the legacy KeysDown[] path must not be mixed with AddKeyEvent
+     * or Dear ImGui asserts ("Backend needs to either only use
+     * io.AddKeyEvent() ... Not both!").
+     */
+    private void clearModifierKeys(ImGuiIO io) {
+        io.addKeyEvent(ImGuiKey.ModCtrl, false);
+        io.addKeyEvent(ImGuiKey.ModShift, false);
+        io.addKeyEvent(ImGuiKey.ModAlt, false);
+        io.addKeyEvent(ImGuiKey.ModSuper, false);
+    }
+
     private boolean isSdlMouseButtonDown(int button) {
         return (SDL_GetMouseState(this.mouseXF, this.mouseYF) & (1 << (button - 1))) != 0;
     }
@@ -441,8 +455,7 @@ public class CustomImGuiImplSdl {
 
         if (ReplayUI.isActive()) {
             var io = ReplayUI.getIO();
-            io.setMouseWheelH(io.getMouseWheelH() + (float) xOffset);
-            io.setMouseWheel(io.getMouseWheel() + (float) yOffset);
+            io.addMouseWheelEvent((float) xOffset, (float) yOffset);
 
             if (Minecraft.getInstance().gui.screen() == null || !ReplayUI.isMainFrameActive()) {
                 return;
@@ -557,13 +570,15 @@ public class CustomImGuiImplSdl {
 
         if (passToImGui) {
             final int imguiKey = sdlKeyToImGuiKey(key);
+            // Do NOT call io.setKeyEventNativeData: with a defaulted legacy index ImGui
+            // uses native_keycode as the io.KeyMap slot, and 26.3 KeyEvents may report
+            // keycode=0. Multiple keys then alias one KeysDown[] mirror slot, which
+            // desyncs from KeysData and trips ImGui's legacy-array sanity assert.
             if (action != 0) {
                 io.addKeyEvent(imguiKey, true);
-                io.setKeyEventNativeData(imguiKey, event.keycode(), key);
                 this.keyOwnedByImGui[key] = true;
             } else {
                 io.addKeyEvent(imguiKey, false);
-                io.setKeyEventNativeData(imguiKey, event.keycode(), key);
                 this.keyOwnedByImGui[key] = false;
             }
         }
@@ -804,11 +819,7 @@ public class CustomImGuiImplSdl {
                 // Release for imgui
                 Arrays.fill(this.keyOwnedByImGui, false);
                 io.clearInputKeys();
-
-                io.setKeyCtrl(false);
-                io.setKeyShift(false);
-                io.setKeyAlt(false);
-                io.setKeySuper(false);
+                this.clearModifierKeys(io);
             }
 
             return;
@@ -817,10 +828,10 @@ public class CustomImGuiImplSdl {
         }
 
         int mod = SDL_GetModState();
-        io.setKeyShift((mod & SDL_KMOD_SHIFT) != 0);
-        io.setKeyCtrl((mod & SDL_KMOD_CTRL) != 0);
-        io.setKeyAlt((mod & SDL_KMOD_ALT) != 0);
-        io.setKeySuper((mod & SDL_KMOD_GUI) != 0);
+        io.addKeyEvent(ImGuiKey.ModShift, (mod & SDL_KMOD_SHIFT) != 0);
+        io.addKeyEvent(ImGuiKey.ModCtrl, (mod & SDL_KMOD_CTRL) != 0);
+        io.addKeyEvent(ImGuiKey.ModAlt, (mod & SDL_KMOD_ALT) != 0);
+        io.addKeyEvent(ImGuiKey.ModSuper, (mod & SDL_KMOD_GUI) != 0);
 
         // Keep SDL text input enabled while ImGui wants text, via vanilla's owner-tracked manager
         boolean wantTextInput = io.getWantTextInput();
@@ -848,11 +859,7 @@ public class CustomImGuiImplSdl {
 
                 Arrays.fill(this.keyOwnedByImGui, false);
                 io.clearInputKeys();
-
-                io.setKeyCtrl(false);
-                io.setKeyShift(false);
-                io.setKeyAlt(false);
-                io.setKeySuper(false);
+                this.clearModifierKeys(io);
 
                 SDL_SetCursor(this.mouseCursors[ImGuiMouseCursor.Arrow]);
             }
@@ -867,7 +874,7 @@ public class CustomImGuiImplSdl {
         var mouseHandledBy = this.getMouseHandledBy();
         if (!mouseHandledBy.allowImgui() || AsyncFileDialogs.hasDialog()) {
             for (int i = 0; i < ImGuiMouseButton.COUNT; i++) {
-                io.setMouseDown(i, false);
+                io.addMouseButtonEvent(i, false);
                 this.mouseJustPressed[i] = false;
             }
             return;
@@ -879,12 +886,12 @@ public class CustomImGuiImplSdl {
             // If a mouse press event came, always pass it as "mouse held this frame", so we don't miss click-release events that are shorter than 1 frame.
             // SDL button mask is indexed by SDL button-1 (left/middle/right); ImGui uses left/right/middle order
             int sdlButton = i == ImGuiMouseButton.Right ? 3 : i == ImGuiMouseButton.Middle ? 2 : i + 1;
-            io.setMouseDown(i, this.mouseJustPressed[i] || (buttonMask & (1 << (sdlButton - 1))) != 0);
+            io.addMouseButtonEvent(i, this.mouseJustPressed[i] || (buttonMask & (1 << (sdlButton - 1))) != 0);
             this.mouseJustPressed[i] = false;
         }
 
-        io.setMousePos(-Float.MAX_VALUE, -Float.MAX_VALUE);
-        io.setMouseHoveredViewport(0);
+        io.addMousePosEvent(-Float.MAX_VALUE, -Float.MAX_VALUE);
+        io.addMouseViewportEvent(0);
 
         // Set OS mouse position from Dear ImGui if requested (rarely used, only when ImGuiConfigFlags_NavEnableSetMousePos is enabled by user)
         if (io.getWantSetMousePos() && this.lastWindowFocused) {
@@ -897,7 +904,7 @@ public class CustomImGuiImplSdl {
         long flags = SDL_GetWindowFlags(this.mainWindowPtr);
         boolean mouseInWindow = (flags & SDL_WINDOW_MOUSE_FOCUS) != 0 || SDL_GetWindowRelativeMouseMode(this.mainWindowPtr);
         if (mouseInWindow) {
-            io.setMousePos(this.mouseXF.get(0), this.mouseYF.get(0));
+            io.addMousePosEvent(this.mouseXF.get(0), this.mouseYF.get(0));
         }
     }
 
@@ -970,7 +977,10 @@ public class CustomImGuiImplSdl {
         }
 
         final long pad = this.gamepad;
-        final MapButton mapButton = (keyNo, buttonNo) -> io.addKeyEvent(keyNo, SDL_GetGamepadButton(pad, buttonNo));
+        final MapButton mapButton = (keyNo, buttonNo) -> {
+            boolean down = SDL_GetGamepadButton(pad, buttonNo);
+            io.addKeyEvent(keyNo, down);
+        };
         final MapAnalog mapAnalog = (keyNo, axisNo, v0, v1) -> {
             float v = SDL_GetGamepadAxis(pad, axisNo) / 32767.0f;
             v = (v - v0) / (v1 - v0);

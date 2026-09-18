@@ -94,14 +94,20 @@ dependencies {
     include(implementation("org.apache.httpcomponents:httpclient:4.5.14"))
     include(implementation("org.apache.httpcomponents:httpcore:4.4.16"))
 
-    // Mod compatibility
-    compileOnly("maven.modrinth:distanthorizons:Mt9bDAs6")
-    compileOnly("maven.modrinth:sodium:Amr4VcZo")
-    compileOnly("maven.modrinth:iris:MwcLS51S")
+    // Compat-test runtime jars for the hidden-client compat scenario (loom remaps them).
+    // Gitignored under deps/compat-test/ — not part of the shipped artifact.
+    if (providers.gradleProperty('flashbackCompatTest').isPresent() && file('deps/compat-test').isDirectory()) {
+        localRuntime fileTree('deps/compat-test') { include '*.jar' }
+    }
+
+    // Mod compatibility (26.3 builds; bobby has no 26.3 release, its mixins stay dormant)
+    compileOnly("maven.modrinth:distanthorizons:I4fvXVOw")
+    compileOnly("maven.modrinth:sodium:bAZQdGpg")
+    compileOnly("maven.modrinth:iris:bAdKrpw8")
     compileOnly("maven.modrinth:bobby:8gsFUovP")
-    compileOnly("maven.modrinth:simple-voice-chat:JDkcoyAy")
-    compileOnly("maven.modrinth:modmenu:jvjwXH6l")
-    compileOnly("maven.modrinth:scalablelux:gYbHVCz8")
+    compileOnly("maven.modrinth:simple-voice-chat:3fRw6NfP")
+    compileOnly("maven.modrinth:modmenu:lcxkZSq6")
+    compileOnly("maven.modrinth:scalablelux:g4eqNSKd")
 
     // FFmpeg
     shadow(implementation("org.bytedeco:javacv-platform:1.5.14") {

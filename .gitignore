@@ -41,4 +41,5 @@ replay_*.log
 artifacts/
 deps/lattice-2.1.0-26.3.jar
 deps/maven/
+deps/compat-test/
 extracted-mc/

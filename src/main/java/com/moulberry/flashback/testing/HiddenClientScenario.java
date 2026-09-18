@@ -95,6 +95,12 @@ public final class HiddenClientScenario {
             }
         } else if (scenario.equals("replay")) {
             runReplayScenario(minecraft);
+        } else if (scenario.equals("export")) {
+            runExportScenario(minecraft);
+        } else if (scenario.equals("editordepth")) {
+            runEditorDepthScenario(minecraft);
+        } else if (scenario.equals("record")) {
+            runRecordScenario(minecraft);
         } else {
             throw new IllegalStateException("Unknown client scenario " + scenario);
         }
@@ -292,6 +298,417 @@ public final class HiddenClientScenario {
     }
 
     private static int replayOpenedTick;
+
+    private static int exportOpenedTick;
+    private static boolean exportOpened;
+    private static int exportActiveTicks;
+    private static boolean exportJobIssued;
+    private static int exportWaitTicks;
+    private static java.nio.file.Path exportOutput;
+
+    /**
+     * Opens the replay, waits for the editor to activate, then queues a real ExportJob
+     * (320x180 MP4/H264 + AAC audio) against a short tick range. Setting
+     * Flashback.EXPORT_JOB deactivates the editor via isActiveInternal and MixinMinecraft's
+     * runTick wrap executes the job on the render thread — exercising the framegraph
+     * render path, SaveableFramebuffer readback, the ffmpeg writer, and the SOFT loopback
+     * audio device (MixinAudioLibrary). Completion is signalled by EXPORT_JOB clearing.
+     */
+    private static void runExportScenario(Minecraft minecraft) {
+        if (!exportOpened) {
+            if (readyTicks < 5) {
+                return;
+            }
+            String path = System.getProperty("flashback.replayPath");
+            if (path == null || path.isBlank()) {
+                throw new IllegalStateException("export scenario requires -Dflashback.replayPath=<zip>");
+            }
+            LOGGER.info("HIDDEN_EXPORT_OPEN path={}", path);
+            Flashback.openReplayWorld(java.nio.file.Path.of(path));
+            exportOpened = true;
+            exportOpenedTick = ticks;
+            return;
+        }
+
+        if (!exportJobIssued) {
+            if (!ReplayUI.isActive()) {
+                if (ticks - exportOpenedTick > 2400) {
+                    throw new IllegalStateException("Export: replay editor never activated");
+                }
+                return;
+            }
+            if (++exportActiveTicks < 30) {
+                return;
+            }
+
+            var replayServer = Flashback.getReplayServer();
+            var editorState = com.moulberry.flashback.state.EditorStateManager.getCurrent();
+            var player = minecraft.player;
+            if (replayServer == null || editorState == null || player == null) {
+                throw new IllegalStateException("Export: editor active but replayServer/editorState/player missing");
+            }
+
+            int start = 200;
+            int end = Math.min(start + 40, replayServer.getTotalReplayTicks());
+            editorState.setExportTicks(start, end, replayServer.getTotalReplayTicks());
+
+            exportOutput = minecraft.gameDirectory.toPath().resolve("export-test.mp4");
+            var settings = new com.moulberry.flashback.exporting.ExportSettings("export-test", editorState.copy(),
+                player.position(), player.getYRot(), player.getXRot(),
+                320, 180, start, end,
+                com.moulberry.flashback.combo_options.ExportProjection.PERSPECTIVE, 1.0f,
+                20.0, false, false,
+                com.moulberry.flashback.combo_options.VideoContainer.MP4,
+                com.moulberry.flashback.combo_options.VideoCodec.H264,
+                com.moulberry.flashback.combo_options.VideoCodec.H264.getEncoders()[0],
+                0, false, false, false,
+                false, com.moulberry.flashback.combo_options.AudioCodec.AAC,
+                exportOutput, null);
+            LOGGER.info("HIDDEN_EXPORT_START ticks={}..{} encoder={} output={}", start, end,
+                com.moulberry.flashback.combo_options.VideoCodec.H264.getEncoders()[0], exportOutput);
+            Flashback.EXPORT_JOB = new com.moulberry.flashback.exporting.ExportJob(settings);
+            exportJobIssued = true;
+            return;
+        }
+
+        if (Flashback.EXPORT_JOB != null) {
+            exportWaitTicks = 0;
+            return;
+        }
+        if (++exportWaitTicks < 5) {
+            return;
+        }
+
+        try {
+            long size = java.nio.file.Files.size(exportOutput);
+            if (size < 10_000) {
+                throw new IllegalStateException("Export output suspiciously small: " + size);
+            }
+            LOGGER.info("HIDDEN_EXPORT_LOOPBACK used={}", probeLoopbackDevice(minecraft));
+            LOGGER.info("HIDDEN_EXPORT_PASS output={} size={}", exportOutput, size);
+        } catch (java.io.IOException exception) {
+            throw new IllegalStateException("Export output missing: " + exportOutput, exception);
+        }
+        screenshotRequested = true;
+        Screenshot.takeScreenshot(minecraft.gameRenderer.mainRenderTarget(), pendingScreenshot::set);
+    }
+
+    private static int depthOpenedTick;
+    private static boolean depthOpened;
+    private static int depthActiveTicks;
+    private static int depthPhase;
+    private static int depthPhaseTicks;
+    private static int depthMarkStart = -1;
+    private static int depthMarkEnd = -1;
+    private static int depthTrackIndex = -1;
+    private static net.minecraft.world.phys.Vec3 depthOriginalPos;
+    private static net.minecraft.world.phys.Vec3 depthExpectedPos;
+    private static int depthTickBefore;
+
+    /**
+     * Exercises editor depth beyond pause: MARK_IN/MARK_OUT keybinds (export range
+     * markers on the scene), a camera keyframe track applied through the real
+     * applyKeyframes -> MinecraftKeyframeHandler -> player.snapTo path, RightArrow
+     * timeline scrubbing through ImGui key events, and Ctrl+Z undo through the
+     * keybind layer reverting the scene history.
+     */
+    private static void runEditorDepthScenario(Minecraft minecraft) {
+        var window = minecraft.getWindow().handle();
+        if (!depthOpened) {
+            if (readyTicks < 5) {
+                return;
+            }
+            String path = System.getProperty("flashback.replayPath");
+            if (path == null || path.isBlank()) {
+                throw new IllegalStateException("editordepth scenario requires -Dflashback.replayPath=<zip>");
+            }
+            LOGGER.info("HIDDEN_DEPTH_OPEN path={}", path);
+            Flashback.openReplayWorld(java.nio.file.Path.of(path));
+            depthOpened = true;
+            depthOpenedTick = ticks;
+            return;
+        }
+
+        var replayServer = Flashback.getReplayServer();
+        var editorState = com.moulberry.flashback.state.EditorStateManager.getCurrent();
+        if (replayServer == null || editorState == null) {
+            return;
+        }
+
+        if (!ReplayUI.isActive()) {
+            if (depthPhase == 0 && ticks - depthOpenedTick > 2400) {
+                throw new IllegalStateException("editordepth: replay editor never activated");
+            }
+            return;
+        }
+        if (depthPhase == 0 && ++depthActiveTicks < 30) {
+            return;
+        }
+
+        if (++depthPhaseTicks > 600) {
+            throw new IllegalStateException("editordepth: phase " + depthPhase + " did not complete");
+        }
+
+        switch (depthPhase) {
+            case 0 -> {
+                // Inject MARK_IN (I) then MARK_OUT (O) through the real keyboard path.
+                long stamp = editorState.acquireRead();
+                try {
+                    var scene = editorState.getCurrentScene(stamp);
+                    depthMarkStart = scene.exportStartTicks;
+                    depthMarkEnd = scene.exportEndTicks;
+                } finally {
+                    editorState.release(stamp);
+                }
+                pressKey(minecraft, InputConstants.KEY_I, 0);
+                pressKey(minecraft, InputConstants.KEY_O, 0);
+                depthPhase = 1;
+                depthPhaseTicks = 0;
+            }
+            case 1 -> {
+                if (depthPhaseTicks < 5) return;
+                int startTick, endTick;
+                long stamp = editorState.acquireWrite();
+                try {
+                    var scene = editorState.getCurrentScene(stamp);
+                    startTick = scene.exportStartTicks;
+                    endTick = scene.exportEndTicks;
+                    if (startTick < 0 || endTick < 0) {
+                        throw new IllegalStateException("MARK_IN/OUT keybinds did not set export ticks: "
+                            + startTick + "/" + endTick);
+                    }
+                    // Build a camera keyframe track: teleport keyframes far from current pos.
+                    var player = minecraft.player;
+                    depthOriginalPos = player.position();
+                    var track = new com.moulberry.flashback.state.KeyframeTrack(
+                        com.moulberry.flashback.keyframe.types.CameraKeyframeType.INSTANCE);
+                    var base = depthOriginalPos;
+                    track.keyframesByTick.put(100, new com.moulberry.flashback.keyframe.impl.CameraKeyframe(
+                        new org.joml.Vector3d(base.x, base.y + 60, base.z), 0.0f, -89.0f, 0.0f));
+                    track.keyframesByTick.put(200, new com.moulberry.flashback.keyframe.impl.CameraKeyframe(
+                        new org.joml.Vector3d(base.x, base.y + 60, base.z), 0.0f, -89.0f, 0.0f));
+                    scene.keyframeTracks.add(track);
+                    depthTrackIndex = scene.keyframeTracks.size() - 1;
+                    // Push a real undo entry through the same API the timeline uses.
+                    scene.setKeyframe(depthTrackIndex, 300, new com.moulberry.flashback.keyframe.impl.CameraKeyframe(
+                        new org.joml.Vector3d(base.x, base.y + 60, base.z), 0.0f, -89.0f, 0.0f));
+                    depthExpectedPos = new net.minecraft.world.phys.Vec3(base.x, base.y + 60, base.z);
+                } finally {
+                    editorState.release(stamp);
+                }
+                LOGGER.info("HIDDEN_DEPTH_MARKERS start={} end={}", startTick, endTick);
+                editorState.markDirty();
+                replayServer.goToReplayTick(150);
+                depthPhase = 2;
+                depthPhaseTicks = 0;
+            }
+            case 2 -> {
+                // goToReplayTick is asynchronous — wait until the replay has
+                // actually reached the keyframe range before forcing an apply.
+                if (replayServer.getReplayTick() < 140) return;
+                // Pause playback so recorded position packets can't overwrite
+                // the keyframe-applied position before we can observe it.
+                replayServer.replayPaused = true;
+                replayServer.forceApplyKeyframes.set(true);
+                // Also apply directly on this thread — the same call runTick makes
+                // — so a broken flag chain can't mask the keyframe machinery.
+                com.moulberry.flashback.state.EditorStateManager.get(replayServer.getMetadata().replayIdentifier)
+                    .applyKeyframes(new com.moulberry.flashback.keyframe.handler.MinecraftKeyframeHandler(minecraft), 150f);
+                depthPhase = 3;
+                depthPhaseTicks = 0;
+            }
+            case 3 -> {
+                var pos = minecraft.player.position();
+                if (depthPhaseTicks % 10 == 0) {
+                    LOGGER.info("HIDDEN_DEPTH_DIAG pos={} paused={} targetTick={} partial={}",
+                        pos, replayServer.replayPaused, replayServer.getReplayTick(),
+                        replayServer.getPartialReplayTick());
+                }
+                if (depthPhaseTicks < 15) return;
+                if (Math.abs(pos.y - depthExpectedPos.y) > 5.0) {
+                    throw new IllegalStateException("Camera keyframe did not move player: expected y~"
+                        + depthExpectedPos.y + " got " + pos);
+                }
+                LOGGER.info("HIDDEN_DEPTH_KEYFRAME moved {} -> {}", depthOriginalPos, pos);
+                replayServer.replayPaused = false;
+                // RightArrow timeline scrub through ImGui.
+                depthTickBefore = replayServer.getReplayTick();
+                pressKey(minecraft, InputConstants.KEY_RIGHT, 0);
+                depthPhase = 4;
+                depthPhaseTicks = 0;
+            }
+            case 4 -> {
+                if (depthPhaseTicks < 10) return;
+                int now = replayServer.getReplayTick();
+                if (now <= depthTickBefore) {
+                    throw new IllegalStateException("RightArrow did not scrub the timeline: " + depthTickBefore + " -> " + now);
+                }
+                LOGGER.info("HIDDEN_DEPTH_SCRUB tick {} -> {}", depthTickBefore, now);
+                // Ctrl+Z: press Z down through the real keyboard path, then emit
+                // ModCtrl/LeftCtrl through io — keyCallback's updateKeyModifiers
+                // emits Mod*=false events from the real keyboard ahead of Z in
+                // the queue, so the mod-down events must land AFTER Z-down to be
+                // live when the Z pressed-edge frame processes. Release Z through
+                // the real path, then release the mods — exercises
+                // Keybinds.UNDO -> editorScene.undo end to end.
+                long window2 = minecraft.getWindow().handle();
+                var io = ReplayUI.getIO();
+                ImGuiContext ctx2 = ReplayUI.getImGuiContext();
+                long prevCtx = ImGui.getCurrentContext().ptr;
+                ImGui.setCurrentContext(ctx2);
+                try {
+                    minecraft.keyboardHandler.keyPress(window2, 1, new KeyEvent(InputConstants.KEY_Z, 0, InputConstants.MOD_CONTROL));
+                    io.addKeyEvent(imgui.moulberry90.flag.ImGuiKey.ModCtrl, true);
+                    io.addKeyEvent(imgui.moulberry90.flag.ImGuiKey.LeftCtrl, true);
+                    minecraft.keyboardHandler.keyPress(window2, 0, new KeyEvent(InputConstants.KEY_Z, 0, InputConstants.MOD_CONTROL));
+                    io.addKeyEvent(imgui.moulberry90.flag.ImGuiKey.ModCtrl, false);
+                    io.addKeyEvent(imgui.moulberry90.flag.ImGuiKey.LeftCtrl, false);
+                } finally {
+                    ImGuiContext current = ImGui.getCurrentContext();
+                    current.ptr = prevCtx;
+                    ImGui.setCurrentContext(current);
+                }
+                depthPhase = 5;
+                depthPhaseTicks = 0;
+            }
+            case 5 -> {
+                if (depthPhaseTicks < 10) return;
+                boolean stillThere;
+                long stamp = editorState.acquireRead();
+                try {
+                    var scene = editorState.getCurrentScene(stamp);
+                    stillThere = scene.keyframeTracks.get(depthTrackIndex).keyframesByTick.containsKey(300);
+                } finally {
+                    editorState.release(stamp);
+                }
+                if (stillThere) {
+                    throw new IllegalStateException("Ctrl+Z did not undo the setKeyframe action: keyframe@300 still present");
+                }
+                LOGGER.info("HIDDEN_DEPTH_UNDO keyframe@300 removed by undo");
+                LOGGER.info("HIDDEN_DEPTH_PASS markers keyframe scrub undo");
+                screenshotRequested = true;
+                Screenshot.takeScreenshot(minecraft.gameRenderer.mainRenderTarget(), pendingScreenshot::set);
+                depthPhase = 6;
+            }
+        }
+    }
+
+    private static int recOpenedTick;
+    private static boolean recOpened;
+    private static boolean recStarted;
+    private static int recStartTicks;
+    private static java.nio.file.Path recReplayDir;
+
+    /**
+     * Exercises the recording path: during live replay playback the client is
+     * connected to the integrated ReplayServer, so packets flow through the same
+     * ClientPacketListener/Connection the Recorder taps (MixinConnection) — this
+     * captures serialization, tick bookkeeping, and ReplayExporter zip writing
+     * exactly as a live record would. Starts the recorder, lets playback run,
+     * finishes with quicksave enabled, then asserts the exported zip exists.
+     */
+    private static void runRecordScenario(Minecraft minecraft) {
+        if (!recOpened) {
+            if (readyTicks < 5) {
+                return;
+            }
+            String path = System.getProperty("flashback.replayPath");
+            if (path == null || path.isBlank()) {
+                throw new IllegalStateException("record scenario requires -Dflashback.replayPath=<zip>");
+            }
+            LOGGER.info("HIDDEN_RECORD_OPEN path={}", path);
+            Flashback.openReplayWorld(java.nio.file.Path.of(path));
+            recOpened = true;
+            recOpenedTick = ticks;
+            return;
+        }
+
+        var replayServer = Flashback.getReplayServer();
+        if (replayServer == null) {
+            if (ticks - recOpenedTick > 2400) {
+                throw new IllegalStateException("record: replay never loaded");
+            }
+            return;
+        }
+
+        if (!recStarted) {
+            if (minecraft.player == null) {
+                return;
+            }
+            Flashback.getConfig().recordingControls.quicksave = true;
+            Flashback.startRecordingReplay();
+            if (Flashback.RECORDER == null) {
+                throw new IllegalStateException("record: startRecordingReplay produced no recorder");
+            }
+            recReplayDir = Flashback.getReplayFolder();
+            recStarted = true;
+            recStartTicks = ticks;
+            // Unpause so playback (and therefore packets) actually advance.
+            replayServer.replayPaused = false;
+            LOGGER.info("HIDDEN_RECORD_START dir={}", recReplayDir);
+            return;
+        }
+
+        if (ticks - recStartTicks < 240) {
+            return;
+        }
+
+        java.io.File[] before = recReplayDir.toFile().listFiles((d, n) -> n.endsWith(".zip"));
+        int countBefore = before == null ? 0 : before.length;
+        Flashback.finishRecordingReplay();
+        if (Flashback.RECORDER != null) {
+            throw new IllegalStateException("record: recorder still set after finish");
+        }
+
+        // The export is async — wait briefly for the zip to land.
+        java.io.File newest = null;
+        for (int i = 0; i < 200; i++) {
+            java.io.File[] now = recReplayDir.toFile().listFiles((d, n) -> n.endsWith(".zip"));
+            if (now != null && now.length > countBefore) {
+                newest = java.util.Arrays.stream(now)
+                    .max(java.util.Comparator.comparingLong(java.io.File::lastModified)).orElse(null);
+                break;
+            }
+            try { Thread.sleep(100); } catch (InterruptedException ignored) {}
+        }
+        if (newest == null || newest.length() < 10_000) {
+            throw new IllegalStateException("record: no replay zip exported to " + recReplayDir);
+        }
+        LOGGER.info("HIDDEN_RECORD_PASS zip={} size={}", newest.getName(), newest.length());
+        screenshotRequested = true;
+        Screenshot.takeScreenshot(minecraft.gameRenderer.mainRenderTarget(), pendingScreenshot::set);
+    }
+
+    private static void pressKey(Minecraft minecraft, int key, int modifiers) {
+        long window = minecraft.getWindow().handle();
+        ImGuiContext context = ReplayUI.getImGuiContext();
+        long previous = ImGui.getCurrentContext().ptr;
+        ImGui.setCurrentContext(context);
+        try {
+            minecraft.keyboardHandler.keyPress(window, 1, new KeyEvent(key, 0, modifiers));
+            minecraft.keyboardHandler.keyPress(window, 0, new KeyEvent(key, 0, modifiers));
+        } finally {
+            ImGuiContext current = ImGui.getCurrentContext();
+            current.ptr = previous;
+            ImGui.setCurrentContext(current);
+        }
+    }
+
+    private static String probeLoopbackDevice(Minecraft minecraft) {
+        try {
+            var soundEngineField = net.minecraft.client.sounds.SoundManager.class.getDeclaredField("soundEngine");
+            soundEngineField.setAccessible(true);
+            Object soundEngine = soundEngineField.get(minecraft.getSoundManager());
+            var libraryField = soundEngine.getClass().getDeclaredField("library");
+            libraryField.setAccessible(true);
+            Object library = libraryField.get(soundEngine);
+            var loopbackField = library.getClass().getDeclaredField("usingLoopbackDevice");
+            loopbackField.setAccessible(true);
+            return String.valueOf(loopbackField.getBoolean(library));
+        } catch (ReflectiveOperationException exception) {
+            return "unknown:" + exception.getClass().getSimpleName();
+        }
+    }
 
     private static void finishReplayProbe(Minecraft minecraft, java.nio.ByteBuffer data, int width, int height) {
         int drawn = 0;
