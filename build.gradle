@@ -231,6 +231,7 @@ shadowJar {
 // Couldn't find a better way of doing this
 tasks.register("mergeShadowWithIncludes", Jar) {
     archiveBaseName.set("merged")
+    destinationDirectory = file("${buildDir}/tmp/mergedJar")
     from(zipTree(project.tasks.jar.archiveFile))
     from(zipTree(project.tasks.shadowJar.archiveFile))
     duplicatesStrategy(DuplicatesStrategy.EXCLUDE)
@@ -238,7 +239,10 @@ tasks.register("mergeShadowWithIncludes", Jar) {
     var archiveFileFrom = it.archiveFile
     var archiveFileTo = project.tasks.jar.archiveFile
     doLast {
-        archiveFileFrom.get().asFile.renameTo(archiveFileTo.get().asFile)
+        // File.renameTo does not overwrite an existing destination on Windows,
+        // which silently shipped a jar missing the shaded imgui/ffmpeg classes.
+        java.nio.file.Files.move(archiveFileFrom.get().asFile.toPath(), archiveFileTo.get().asFile.toPath(),
+            java.nio.file.StandardCopyOption.REPLACE_EXISTING)
     }
 }
 project.assemble.dependsOn(mergeShadowWithIncludes)
