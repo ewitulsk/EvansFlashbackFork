@@ -1,7 +1,10 @@
 package com.moulberry.flashback;
 
 import com.mojang.blaze3d.platform.Window;
-import org.lwjgl.glfw.GLFW;
+import org.lwjgl.BufferUtils;
+import org.lwjgl.sdl.SDLVideo;
+
+import java.nio.IntBuffer;
 
 public class WindowSizeTracker {
 
@@ -35,11 +38,11 @@ public class WindowSizeTracker {
 
     private static void recalculate(Window window) {
         // Calculate real framebuffer width/height
-        int[] width = new int[1];
-        int[] height = new int[1];
-        GLFW.glfwGetFramebufferSize(window.handle(), width, height);
-        realFramebufferWidth = width[0] > 0 ? width[0] : 1;
-        realFramebufferHeight = height[0] > 0 ? height[0] : 1;
+        IntBuffer width = BufferUtils.createIntBuffer(1);
+        IntBuffer height = BufferUtils.createIntBuffer(1);
+        SDLVideo.SDL_GetWindowSizeInPixels(window.handle(), width, height);
+        realFramebufferWidth = width.get(0) > 0 ? width.get(0) : 1;
+        realFramebufferHeight = height.get(0) > 0 ? height.get(0) : 1;
 
         // Update cached values
         lastFramebufferWidth = window.framebufferWidth;

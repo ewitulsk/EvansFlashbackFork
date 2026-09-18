@@ -13,7 +13,7 @@ import imgui.moulberry90.flag.ImGuiCond;
 import imgui.moulberry90.flag.ImGuiHoveredFlags;
 import imgui.moulberry90.flag.ImGuiWindowFlags;
 import imgui.moulberry90.type.ImBoolean;
-import net.minecraft.util.Util;
+import com.mojang.blaze3d.Blaze3D;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.client.resources.language.I18n;
@@ -134,10 +134,10 @@ public class ExportDoneWindow {
                     }
 
                     if (ImGui.imageButton("ExportThumbnail", id, new ImVec2(width, height))) {
-                        Util.getPlatform().openPath(entry.outputLocation);
+                        Blaze3D.openPath(entry.outputLocation);
                     }
                 } else if (ImGui.button(I18n.get("flashback.export_done.missing_thumbnail"), DESIRED_W+padding.x*2, DESIRED_H+padding.y*2)) {
-                    Util.getPlatform().openPath(entry.outputLocation);
+                    Blaze3D.openPath(entry.outputLocation);
                 }
 
                 ImGui.sameLine();
@@ -162,14 +162,14 @@ public class ExportDoneWindow {
 
                 if (entry.outputIsFolder) {
                     if (ImGui.button(I18n.get("flashback.open_folder"))) {
-                        Util.getPlatform().openPath(entry.outputLocation);
+                        Blaze3D.openPath(entry.outputLocation);
                     }
                 } else {
                     if (ImGui.button(I18n.get("flashback.open_file"))) {
-                        Util.getPlatform().openPath(entry.outputLocation);
+                        Blaze3D.openPath(entry.outputLocation);
                     }
                     if (ImGui.button(I18n.get("flashback.open_folder"))) {
-                        Util.getPlatform().openPath(entry.outputLocation.getParent());
+                        Blaze3D.openPath(entry.outputLocation.getParent());
                     }
                 }
 
@@ -274,7 +274,7 @@ public class ExportDoneWindow {
                 ImGui.textColored(0xFFF4A903, shareUrlStr);
                 if (ImGui.isItemClicked()) {
                     try {
-                        Util.getPlatform().openUri(shareUrl);
+                        Blaze3D.openUri(shareUrl);
                     } catch (Exception ignored) {}
                 }
                 String clipboard = Minecraft.getInstance().keyboardHandler.getClipboard();

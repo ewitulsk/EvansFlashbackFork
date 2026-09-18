@@ -1,17 +1,18 @@
 package com.moulberry.flashback.visuals;
 
-import com.mojang.blaze3d.IndexType;
-import com.mojang.blaze3d.PrimitiveTopology;
-import com.mojang.blaze3d.buffers.GpuBuffer;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
+import com.mojang.renderpearl.api.pipeline.IndexType;
+import com.mojang.renderpearl.api.pipeline.PrimitiveTopology;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.pipeline.RenderTarget;
-import com.mojang.blaze3d.systems.RenderPass;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.textures.GpuTexture;
-import com.mojang.blaze3d.textures.GpuTextureView;
+import com.mojang.renderpearl.api.textures.GpuTexture;
+import com.mojang.renderpearl.api.textures.GpuTextureView;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
-import com.mojang.blaze3d.vertex.VertexFormat;
+import com.mojang.renderpearl.api.vertex.VertexFormat;
+import net.minecraft.client.renderer.StagedVertexBuffer;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.RenderPipelines;
 import net.minecraft.client.renderer.rendertype.PreparedRenderType;
@@ -67,17 +68,30 @@ public class FlashbackDrawBuffer implements AutoCloseable {
     }
 
     public void drawRenderType(PreparedRenderType renderType) {
+        RenderTarget renderTarget = Minecraft.getInstance().gameRenderer.mainRenderTarget();
+
+        var commandEncoder = RenderSystem.getDevice().createCommandEncoder();
+        try (RenderPass renderPass = commandEncoder.createRenderPass(() -> "flashback draw", renderTarget.getColorTextureView(), Optional.empty(), renderTarget.hasDepth() ? renderTarget.getDepthTextureView() : null, OptionalDouble.empty())) {
+            drawRenderType(renderType, renderPass);
+        }
+    }
+
+    public void drawRenderType(PreparedRenderType renderType, RenderPass renderPass) {
         RenderSystem.AutoStorageIndexBuffer autoStorageIndexBuffer = RenderSystem.getSequentialBuffer(this.vertexFormatMode);
         GpuBuffer indexBuffer = autoStorageIndexBuffer.getBuffer(this.indexCount);
         IndexType indexType = autoStorageIndexBuffer.type();
 
         renderType.drawFromBuffer(
-            this.vertexBuffer,
-            indexBuffer,
-            indexType,
-            0,
-            0,
-            this.indexCount
+            new StagedVertexBuffer.ExecuteInfo(
+                this.vertexBuffer,
+                indexBuffer,
+                indexType,
+                0,
+                0,
+                this.indexCount,
+                this.vertexFormatMode
+            ),
+            renderPass
         );
     }
 
@@ -96,8 +110,8 @@ public class FlashbackDrawBuffer implements AutoCloseable {
         );
 
         var commandEncoder = RenderSystem.getDevice().createCommandEncoder();
-        try (RenderPass renderPass = commandEncoder.createRenderPass(() -> "flashback draw", renderTarget.getColorTextureView(), Optional.empty(), renderTarget.useDepth ? renderTarget.getDepthTextureView() : null, OptionalDouble.empty())) {
-            renderPass.setPipeline(RenderPipelines.LINES);
+        try (RenderPass renderPass = commandEncoder.createRenderPass(() -> "flashback draw", renderTarget.getColorTextureView(), Optional.empty(), renderTarget.hasDepth() ? renderTarget.getDepthTextureView() : null, OptionalDouble.empty())) {
+            renderPass.setPipeline(RenderSystem.getCompiledPipeline(RenderPipelines.LINES));
 
             RenderSystem.bindDefaultUniforms(renderPass);
             renderPass.setUniform("DynamicTransforms", gpuBufferSlice);

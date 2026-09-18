@@ -38,3 +38,7 @@ hs_err_*.log
 replay_*.log
 *.hprof
 *.jfr
+artifacts/
+deps/lattice-2.1.0-26.3.jar
+deps/maven/
+extracted-mc/

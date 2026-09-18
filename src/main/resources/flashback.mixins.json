@@ -4,12 +4,14 @@
   "plugin": "com.moulberry.mixinconstraints.ConstraintsMixinPlugin",
   "compatibilityLevel": "JAVA_21",
   "client": [
+    "MixinCloudRenderer",
     "MixinDebugScreenEntryList",
     "MixinDebugScreenOverlay",
     "MixinLanguageManager",
     "MixinLevelExtractor",
     "MixinLevelRenderer",
     "MixinMinecraft",
+    "MixinKeyboardHandler",
     "MixinMouseHandler",
     "MixinPlayerInfo",
     "MixinWindow",
@@ -31,8 +33,9 @@
     "playback.MixinClientCommonPacketListenerImpl",
     "playback.MixinClientPacketListener",
     "playback.MixinFrustum",
+    "playback.MixinFirstPersonHandsAndItems",
+    "playback.MixinFirstPersonHandsAndItemsRenderer",
     "playback.MixinGameRenderer",
-    "playback.MixinItemInHandRenderer",
     "playback.MixinProjection",
     "playback.MixinRemotePlayer",
     "record.MixinClientConfigurationPacketListenerImpl",
@@ -63,7 +66,10 @@
     "visuals.MixinParticleEngine",
     "visuals.MixinPlayer",
     "visuals.MixinPlayerRenderer",
-    "visuals.MixinWeatherEffectRenderer"
+    "visuals.MixinWeatherEffectRenderer",
+    "testing.MixinHiddenClient",
+    "testing.MixinHiddenMouse",
+    "testing.MixinHiddenWindow"
   ],
   "injectors": {
     "defaultRequire": 1

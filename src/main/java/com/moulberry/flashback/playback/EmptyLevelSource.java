@@ -11,18 +11,17 @@ import net.minecraft.world.level.biome.Biome;
 import net.minecraft.world.level.biome.BiomeManager;
 import net.minecraft.world.level.biome.Biomes;
 import net.minecraft.world.level.biome.FixedBiomeSource;
-import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.chunk.ChunkAccess;
 import net.minecraft.world.level.chunk.ChunkGenerator;
-import net.minecraft.world.level.levelgen.GenerationStep;
 import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.level.levelgen.RandomState;
 import net.minecraft.world.level.levelgen.blending.Blender;
+import net.minecraft.world.level.levelgen.densityfunction.SamplerContext;
 
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
 
 public class EmptyLevelSource extends ChunkGenerator {
     public static final MapCodec<EmptyLevelSource> CODEC = RecordCodecBuilder.mapCodec(instance -> instance.group(RegistryOps.retrieveElement(Biomes.PLAINS)).apply(instance, instance.stable(EmptyLevelSource::new)));
@@ -37,20 +36,13 @@ public class EmptyLevelSource extends ChunkGenerator {
     }
 
     @Override
-    public void applyCarvers(WorldGenRegion worldGenRegion, long l, RandomState randomState, BiomeManager biomeManager, StructureManager structureManager, ChunkAccess chunkAccess) {
-    }
-
-    @Override
-    public void buildSurface(WorldGenRegion worldGenRegion, StructureManager structureManager, RandomState randomState, ChunkAccess chunkAccess) {
+    public CompletableFuture<ChunkAccess> buildTerrain(ChunkAccess chunkAccess, Blender blender, RandomState randomState,
+        StructureManager structureManager, BiomeManager biomeManager, WorldGenRegion worldGenRegion, Set<Holder<Biome>> biomes) {
+        return CompletableFuture.completedFuture(chunkAccess);
     }
 
     @Override
     public void applyBiomeDecoration(WorldGenLevel worldGenLevel, ChunkAccess chunkAccess, StructureManager structureManager) {
-    }
-
-    @Override
-    public CompletableFuture<ChunkAccess> fillFromNoise(Blender blender, RandomState randomState, StructureManager structureManager, ChunkAccess chunkAccess) {
-        return CompletableFuture.completedFuture(chunkAccess);
     }
 
     @Override
@@ -64,7 +56,7 @@ public class EmptyLevelSource extends ChunkGenerator {
     }
 
     @Override
-    public void addDebugScreenInfo(List<String> list, RandomState randomState, BlockPos blockPos) {
+    public void addDebugScreenInfo(List<String> list, RandomState randomState, BlockPos blockPos, SamplerContext samplerContext) {
     }
 
     @Override

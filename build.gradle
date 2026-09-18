@@ -11,7 +11,7 @@ buildscript {
 }
 
 plugins {
-    id 'net.fabricmc.fabric-loom' version '1.15-SNAPSHOT'
+    id 'net.fabricmc.fabric-loom' version '1.17-SNAPSHOT'
     id 'com.gradleup.shadow' version "9.3.0"
     id 'maven-publish'
 }
@@ -24,6 +24,12 @@ base {
 }
 
 repositories {
+    maven {
+        url = uri('deps/maven')
+        content {
+            includeGroup("com.moulberry")
+        }
+    }
     maven {
         url = "https://pkgs.dev.azure.com/djtheredstoner/DevAuth/_packaging/public/maven/v1"
         content {
@@ -47,6 +53,22 @@ repositories {
 
 loom {
     accessWidenerPath = file("src/main/resources/flashback.accesswidener")
+
+    runs {
+        client {
+            // Scripted hidden-client test harness (see scripts/Test-ClientSmoke.ps1).
+            if (providers.gradleProperty('flashbackClientRunDir').isPresent()) {
+                runDir providers.gradleProperty('flashbackClientRunDir').get()
+            }
+            if (providers.gradleProperty('flashbackClientScenario').isPresent()) {
+                vmArg '-Dflashback.hiddenClient=true'
+                vmArg "-Dflashback.clientScenario=${providers.gradleProperty('flashbackClientScenario').get()}"
+            }
+            if (providers.gradleProperty('flashbackReplayPath').isPresent()) {
+                vmArg "-Dflashback.replayPath=${providers.gradleProperty('flashbackReplayPath').get()}"
+            }
+        }
+    }
 }
 
 dependencies {
@@ -64,8 +86,8 @@ dependencies {
     // MixinSquared
     include(implementation(annotationProcessor("com.github.bawnorton.mixinsquared:mixinsquared-fabric:0.3.7-beta.1")))
 
-    // Lattice (config)
-    include(implementation("com.moulberry:lattice:2.1.0"))
+    // Lattice (config) - 26.3 build (SDL input, ported locally)
+    include(implementation("com.moulberry:lattice:2.1.0-26.3"))
 
     // Apache stuff
     include(implementation("org.apache.commons:commons-math3:3.6.1"))
@@ -214,3 +236,40 @@ tasks.register("mergeShadowWithIncludes", Jar) {
     }
 }
 project.assemble.dependsOn(mergeShadowWithIncludes)
+
+// Export the configured client launch as a standalone spec for scripted test runners.
+// Only project-configured environment additions are exported, never the host's environment.
+tasks.register('exportTestLaunches') {
+    dependsOn 'classes', 'configureClientLaunch'
+    doLast {
+        def directory = file(providers.gradleProperty('flashbackLaunchExportDir').get())
+        directory.mkdirs()
+        def run = tasks.named('runClient').get()
+        def javaExecutable = run.javaLauncher.isPresent()
+            ? run.javaLauncher.get().executablePath.asFile.absolutePath
+            : new File(System.getProperty('java.home'), 'bin/java' + (org.gradle.nativeplatform.platform.internal.DefaultNativePlatform.currentOperatingSystem.isWindows() ? '.exe' : '')).absolutePath
+        def command = [javaExecutable]
+        // Project-owned scripted processes retain pause evidence beside their normal logs.
+        command.add('-Xlog:gc*,safepoint:file=jvm-pauses.log:time,uptime,level,tags:filecount=2,filesize=8M')
+        command.addAll(run.allJvmArgs)
+        command.addAll(run.jvmArgumentProviders.collectMany { it.asArguments() as List })
+        if (!run.classpath.empty) command.addAll(['-cp', run.classpath.asPath])
+        command.add(run.mainClass.get())
+        if (run.args != null) command.addAll(run.args as List)
+        command.addAll(run.argumentProviders.collectMany { it.asArguments() as List })
+        // Each exported launch owns its argument files.
+        command = command.withIndex().collect { argument, index ->
+            if (argument.startsWith('@')) {
+                def source = file(argument.substring(1).replaceAll('^"|"$', ''))
+                if (!source.isFile()) throw new GradleException('Missing launch argument file: ' + source)
+                def snapshot = new File(directory, 'client-arguments-' + index + '.txt')
+                snapshot.bytes = source.bytes
+                return '@' + snapshot.absolutePath
+            }
+            return argument
+        }
+        def runDirectory = providers.gradleProperty('flashbackClientRunDir').map { file(it).absolutePath }.getOrElse(run.workingDir.absolutePath)
+        def spec = [command: command, environment: run.environment, directory: runDirectory]
+        new File(directory, 'client-launch.json').text = groovy.json.JsonOutput.prettyPrint(groovy.json.JsonOutput.toJson(spec))
+    }
+}

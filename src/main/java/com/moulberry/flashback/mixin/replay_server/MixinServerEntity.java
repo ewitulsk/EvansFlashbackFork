@@ -35,9 +35,9 @@ public class MixinServerEntity {
     @Shadow public Entity entity;
 
     @ModifyVariable(method = "<init>", at = @At("HEAD"), argsOnly = true)
-    private static int init_modifyUpdateInterval(int updateInterval, @Local(argsOnly = true) ServerLevel level) {
-        if (updateInterval < 20 && level != null && level.getServer() instanceof ReplayServer) {
-            return 1;
+    private static net.minecraft.world.entity.UpdateInterval init_modifyUpdateInterval(net.minecraft.world.entity.UpdateInterval updateInterval, @Local(argsOnly = true) ServerLevel level) {
+        if (level != null && level.getServer() instanceof ReplayServer) {
+            return net.minecraft.world.entity.UpdateInterval.periodic(1);
         }
         return updateInterval;
     }

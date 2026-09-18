@@ -10,6 +10,7 @@ import java.util.Set;
 
 public interface ItemInHandRendererExt {
 
-    void flashback$renderHandsWithItems(float f, PoseStack poseStack, SubmitNodeCollector submitNodeCollector, AbstractClientPlayer localPlayer, int i, @Nullable Set<InteractionHand> renderable);
+    void flashback$renderHandsWithItems(float partialTick, PoseStack poseStack, SubmitNodeCollector submitNodeCollector,
+        AbstractClientPlayer spectator, @Nullable Set<InteractionHand> renderableArms);
 
 }

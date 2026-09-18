@@ -41,7 +41,7 @@ public class ReplayPlayer extends ServerPlayer {
     public CommonPlayerSpawnInfo createCommonSpawnInfo(ServerLevel serverLevel) {
         return new CommonPlayerSpawnInfo(serverLevel.dimensionTypeRegistration(), serverLevel.dimension(),
             ((ServerLevelExt)serverLevel).flashback$getSeedHash(), this.gameMode.getGameModeForPlayer(),
-            this.gameMode.getPreviousGameModeForPlayer(),
+            java.util.Optional.ofNullable(this.gameMode.getPreviousGameModeForPlayer()),
             serverLevel.isDebug(), serverLevel.isFlat(), this.getLastDeathLocation(), this.getPortalCooldown(), serverLevel.getSeaLevel());
     }
 

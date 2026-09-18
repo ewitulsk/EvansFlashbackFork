@@ -16,7 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 public abstract class MixinEntityRenderDispatcher {
 
     @Inject(method = "shouldRender", at = @At("HEAD"), cancellable = true)
-    public void shouldRender(Entity entity, Frustum frustum, double d, double e, double f, CallbackInfoReturnable<Boolean> cir) {
+    public void shouldRender(Entity entity, Frustum frustum, double d, double e, double f, float partialTick, CallbackInfoReturnable<Boolean> cir) {
         EditorState editorState = EditorStateManager.getCurrent();
         if (editorState != null) {
             if (!editorState.filteredEntities.isEmpty()) {

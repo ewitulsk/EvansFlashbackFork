@@ -328,7 +328,14 @@ public class ReplayConfigurationPacketHandler implements ClientConfigurationPack
         if (this.pendingTags == null) {
             this.pendingTags = new HashMap<>();
         }
-        this.pendingTags.putAll(clientboundUpdateTagsPacket.getTags());
+        this.pendingTags.putAll(clientboundUpdateTagsPacket.tags());
+    }
+
+    @Override
+    public void handlePostEffects(ClientboundPostEffectsPacket clientboundPostEffectsPacket) {
+        for (ServerPlayer replayViewer : this.replayServer.getReplayViewers()) {
+            replayViewer.connection.send(clientboundPostEffectsPacket);
+        }
     }
 
     @Override

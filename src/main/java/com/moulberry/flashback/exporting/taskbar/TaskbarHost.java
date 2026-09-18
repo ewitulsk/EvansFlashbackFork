@@ -5,9 +5,10 @@ import com.sun.jna.Pointer;
 import com.sun.jna.platform.win32.*;
 import com.sun.jna.ptr.PointerByReference;
 import net.minecraft.client.Minecraft;
-import org.lwjgl.glfw.GLFWNativeWin32;
+import org.lwjgl.sdl.SDLProperties;
+import org.lwjgl.sdl.SDLVideo;
 
-import static com.moulberry.flashback.editor.ui.CustomImGuiImplGlfw.IS_WINDOWS;
+import static com.moulberry.flashback.editor.ui.CustomImGuiImplSdl.IS_WINDOWS;
 
 public class TaskbarHost {
     public static ITaskbar createTaskbar() {
@@ -35,7 +36,10 @@ public class TaskbarHost {
         }
 
 
-        var hwnd = new WinDef.HWND(new Pointer(GLFWNativeWin32.glfwGetWin32Window(Minecraft.getInstance().getWindow().handle())));
+        long sdlWindow = Minecraft.getInstance().getWindow().handle();
+        int props = SDLVideo.SDL_GetWindowProperties(sdlWindow);
+        long hwndPointer = SDLProperties.SDL_GetPointerProperty(props, SDLVideo.SDL_PROP_WINDOW_WIN32_HWND_POINTER, 0);
+        var hwnd = new WinDef.HWND(new Pointer(hwndPointer));
         return new WindowsTaskbar(itaskbar3res.getValue(), hwnd);
     }
 }

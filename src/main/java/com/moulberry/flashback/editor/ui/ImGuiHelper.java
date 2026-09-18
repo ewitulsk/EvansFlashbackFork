@@ -14,7 +14,7 @@ import imgui.moulberry90.type.ImBoolean;
 import imgui.moulberry90.type.ImFloat;
 import imgui.moulberry90.type.ImInt;
 import imgui.moulberry90.type.ImString;
-import org.lwjgl.glfw.GLFW;
+import com.mojang.blaze3d.platform.InputConstants;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -165,19 +165,30 @@ public class ImGuiHelper {
         return changed;
     }
 
-    public static boolean isGlfwBindingDown(int key) {
+    // Keybind keys are SDL scancodes; negative keys encode an SDL mouse button as -button-1.
+    // SDL button order is left/middle/right, ImGui order is left/right/middle.
+    private static int sdlMouseButtonToImGui(int sdlButton) {
+        return switch (sdlButton) {
+            case 1 -> ImGuiMouseButton.Left;
+            case 2 -> ImGuiMouseButton.Middle;
+            case 3 -> ImGuiMouseButton.Right;
+            default -> sdlButton - 1;
+        };
+    }
+
+    public static boolean isSdlBindingDown(int key) {
         if (key == 0) {
             return false;
         }
 
         if (key < 0) {
-            int mouse = -key-1;
+            int mouse = sdlMouseButtonToImGui(-key-1);
             if (mouse >= ImGuiMouseButton.COUNT) {
                 return false;
             }
             return ImGui.isMouseDown(mouse);
         } else {
-            int namedKey = CustomImGuiImplGlfw.glfwKeyToImGuiKey(key);
+            int namedKey = CustomImGuiImplSdl.sdlKeyToImGuiKey(key);
             if (namedKey < ImGuiKey.NamedKey_BEGIN || namedKey >= ImGuiKey.NamedKey_END) {
                 return false;
             }
@@ -185,19 +196,19 @@ public class ImGuiHelper {
         }
     }
 
-    public static boolean isGlfwBindingClicked(int key, boolean repeat) {
+    public static boolean isSdlBindingClicked(int key, boolean repeat) {
         if (key == 0) {
             return false;
         }
 
         if (key < 0) {
-            int mouse = -key-1;
+            int mouse = sdlMouseButtonToImGui(-key-1);
             if (mouse >= ImGuiMouseButton.COUNT) {
                 return false;
             }
             return ImGui.isMouseClicked(mouse, repeat);
         } else {
-            int namedKey = CustomImGuiImplGlfw.glfwKeyToImGuiKey(key);
+            int namedKey = CustomImGuiImplSdl.sdlKeyToImGuiKey(key);
             if (namedKey < ImGuiKey.NamedKey_BEGIN || namedKey >= ImGuiKey.NamedKey_END) {
                 return false;
             }
@@ -231,7 +242,7 @@ public class ImGuiHelper {
 
     public static boolean backspaceInput(int mods) {
         if (wantSpecialInputLastFrame) {
-            if ((mods & GLFW.GLFW_MOD_CONTROL) != 0) {
+            if ((mods & InputConstants.MOD_CONTROL) != 0) {
                 specialInput.setLength(0);
                 backspaceCount = 10000;
                 return true;
@@ -429,9 +440,9 @@ public class ImGuiHelper {
                 }
             }
 
-            if (!handledFocusNext && ImGui.isItemActive() && ImGui.isKeyPressed(GLFW.GLFW_KEY_TAB, false)) {
+            if (!handledFocusNext && ImGui.isItemActive() && ImGui.isKeyPressed(ImGuiKey.Tab, false)) {
                 handledFocusNext = true;
-                if (ImGui.isKeyDown(GLFW.GLFW_KEY_LEFT_SHIFT) || ImGui.isKeyDown(GLFW.GLFW_KEY_RIGHT_SHIFT)) {
+                if (ImGui.isKeyDown(ImGuiKey.LeftShift) || ImGui.isKeyDown(ImGuiKey.RightShift)) {
                     focusLastIndex = focusIndex - 1;
                 } else {
                     focusNext = true;
@@ -502,9 +513,9 @@ public class ImGuiHelper {
                 }
             }
 
-            if (!handledFocusNext && ImGui.isItemActive() && ImGui.isKeyPressed(GLFW.GLFW_KEY_TAB, false)) {
+            if (!handledFocusNext && ImGui.isItemActive() && ImGui.isKeyPressed(ImGuiKey.Tab, false)) {
                 handledFocusNext = true;
-                if (ImGui.isKeyDown(GLFW.GLFW_KEY_LEFT_SHIFT) || ImGui.isKeyDown(GLFW.GLFW_KEY_RIGHT_SHIFT)) {
+                if (ImGui.isKeyDown(ImGuiKey.LeftShift) || ImGui.isKeyDown(ImGuiKey.RightShift)) {
                     focusLastIndex = focusIndex - 1;
                 } else {
                     focusNext = true;

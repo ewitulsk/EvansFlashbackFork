@@ -1,13 +1,15 @@
 package com.moulberry.flashback.exporting;
 
 import com.mojang.blaze3d.ProjectionType;
-import com.mojang.blaze3d.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.buffers.GpuBuffer;
+import com.mojang.renderpearl.api.commands.RenderPass;
 import com.mojang.blaze3d.pipeline.RenderTarget;
+import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.platform.NativeImage;
 import com.mojang.blaze3d.platform.Window;
-import com.mojang.blaze3d.systems.GpuSurface;
+import com.mojang.renderpearl.api.device.GpuSurface;
 import com.mojang.blaze3d.systems.RenderSystem;
-import com.mojang.blaze3d.systems.SurfaceException;
+import com.mojang.renderpearl.api.device.SurfaceException;
 import com.mojang.blaze3d.vertex.BufferBuilder;
 import com.mojang.blaze3d.vertex.ByteBufferBuilder;
 import com.mojang.blaze3d.vertex.MeshData;
@@ -31,7 +33,6 @@ import net.minecraft.ChatFormatting;
 import net.minecraft.client.gui.font.TextRenderable;
 import net.minecraft.client.renderer.Projection;
 import net.minecraft.client.renderer.ProjectionMatrixBuffer;
-import net.minecraft.client.renderer.rendertype.OutputTarget;
 import net.minecraft.client.renderer.rendertype.PreparedRenderType;
 import net.minecraft.client.renderer.rendertype.RenderType;
 import net.minecraft.util.LightCoordsUtil;
@@ -51,8 +52,8 @@ import net.minecraft.world.phys.Vec3;
 import org.bytedeco.ffmpeg.global.avutil;
 import org.joml.Matrix4f;
 import org.joml.Vector4f;
-import org.lwjgl.glfw.GLFW;
 import org.lwjgl.openal.SOFTLoopback;
+import org.lwjgl.sdl.SDLMouse;
 
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -592,7 +593,7 @@ public class ExportJob {
         RenderSystem.executePendingTasks();
 
         FramebufferUtils.clear(renderTarget, EMPTY_CLEAR_COLOUR);
-        minecraft.gameRenderer.render(timer, true);
+        minecraft.gameRenderer.render();
     }
 
     private void updateRandoms(Random random, Random mathRandom) {
@@ -931,7 +932,7 @@ public class ExportJob {
 
     private static void finishHiddenFrame() {
         RenderSystem.executePendingTasks();
-        RenderSystem.pollEvents();
+        RenderSystem.pollEvents(Minecraft.getInstance().sdlEventHandler);
         RenderSystem.getDevice().createCommandEncoder().submit();
         RenderSystem.getDynamicUniforms().reset();
         Minecraft.getInstance().levelRenderer.endFrame();
@@ -939,7 +940,7 @@ public class ExportJob {
 
     private boolean finishFrame(RenderTarget framebuffer, List<String> lines, boolean forceShow, boolean showCancel) {
         RenderSystem.executePendingTasks();
-        RenderSystem.pollEvents();
+        RenderSystem.pollEvents(Minecraft.getInstance().sdlEventHandler);
 
         long currentTime = System.currentTimeMillis();
         if (currentTime - this.lastRenderMillis > 1000/60 || forceShow) {
@@ -1002,7 +1003,7 @@ public class ExportJob {
 
         lines.add("");
 
-        boolean debugPressed = GLFW.glfwGetKey(Minecraft.getInstance().getWindow().handle(), GLFW.GLFW_KEY_F3) != GLFW.GLFW_RELEASE;
+        boolean debugPressed = InputConstants.isKeyDown(InputConstants.KEY_F3);
         if (pressedDebugKey != debugPressed) {
             pressedDebugKey = debugPressed;
             if (pressedDebugKey) {
@@ -1020,7 +1021,7 @@ public class ExportJob {
         lines.add("");
 
         if (showCancel) {
-            if (GLFW.glfwGetKey(Minecraft.getInstance().getWindow().handle(), GLFW.GLFW_KEY_ESCAPE) != GLFW.GLFW_RELEASE) {
+            if (InputConstants.isKeyDown(InputConstants.KEY_ESCAPE)) {
                 long current = System.currentTimeMillis();
                 if (this.escapeCancelStartMillis <= 0 || current < this.escapeCancelStartMillis) {
                     this.escapeCancelStartMillis = current;
@@ -1052,8 +1053,9 @@ public class ExportJob {
             }
         }
 
-        double mouseX = ReplayUI.imguiGlfw.rawMouseX / window.getScreenWidth() * scaledWidth;
-        double mouseY = ReplayUI.imguiGlfw.rawMouseY / window.getScreenHeight() * scaledHeight;
+        var imguiSdl = ReplayUI.imguiSdl();
+        double mouseX = imguiSdl != null ? imguiSdl.rawMouseX / window.getScreenWidth() * scaledWidth : -1;
+        double mouseY = imguiSdl != null ? imguiSdl.rawMouseY / window.getScreenHeight() * scaledHeight : -1;
 
         y += font.lineHeight / 2 + 1;
 
@@ -1064,10 +1066,10 @@ public class ExportJob {
             var prepared = font.prepareText(underlined.getVisualOrderText(), x - patreonWidth/2f, y, -1, true, false, 0);
             preparedTexts.add(prepared);
 
-            if (GLFW.glfwGetMouseButton(window.handle(), GLFW.GLFW_MOUSE_BUTTON_LEFT) != 0) {
+            if ((SDLMouse.SDL_GetMouseState(null, null) & SDLMouse.SDL_BUTTON_LMASK) != 0) {
                 if (!this.patreonLinkClicked) {
                     this.patreonLinkClicked = true;
-                    Util.getPlatform().openUri(patreon);
+                    com.mojang.blaze3d.Blaze3D.openUri(java.net.URI.create(patreon));
                 }
             } else {
                 this.patreonLinkClicked = false;
@@ -1109,15 +1111,19 @@ public class ExportJob {
                     try (FlashbackDrawBuffer drawBuffer = new FlashbackDrawBuffer(GpuBuffer.USAGE_MAP_WRITE)) {
                         drawBuffer.upload(meshData);
                         PreparedRenderType prepared = renderType.prepare();
-                        PreparedRenderType withCustomTarget = new PreparedRenderType(prepared.pipeline(), new OutputTarget("Flashback Info", () -> displayTarget),
+                        PreparedRenderType withCustomName = new PreparedRenderType("Flashback Info", prepared.pipeline(), prepared.oitPipelineSet(),
                             prepared.dynamicTransforms(), prepared.scissorState(), prepared.textures());
-                        drawBuffer.drawRenderType(withCustomTarget);
+                        try (RenderPass renderPass = RenderSystem.getDevice().createCommandEncoder().createRenderPass(() -> "Flashback Info",
+                            displayTarget.getColorTextureView(), Optional.empty(),
+                            displayTarget.hasDepth() ? displayTarget.getDepthTextureView() : null, OptionalDouble.empty())) {
+                            drawBuffer.drawRenderType(withCustomName, renderPass);
+                        }
                     }
                 }
             }
         }
 
-        if (!window.isMinimized()) {
+        if (!window.isIconified()) {
             var windowSurface = Minecraft.getInstance().windowSurface();
 
             try {

@@ -1,24 +1,18 @@
 package com.moulberry.flashback.mixin.visuals;
 
 import com.llamalad7.mixinextras.sugar.Local;
-import com.mojang.blaze3d.buffers.GpuBufferSlice;
 import com.mojang.blaze3d.framegraph.FrameGraphBuilder;
 import com.mojang.blaze3d.framegraph.FramePass;
-import com.mojang.blaze3d.pipeline.RenderTarget;
 import com.mojang.blaze3d.resource.GraphicsResourceAllocator;
 import com.mojang.blaze3d.resource.ResourceHandle;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
+import com.mojang.renderpearl.api.buffers.GpuBufferSlice;
 import com.moulberry.flashback.Flashback;
 import com.moulberry.flashback.visuals.WorldRenderHook;
-import net.minecraft.client.Camera;
-import net.minecraft.client.DeltaTracker;
-import net.minecraft.client.Minecraft;
-import net.minecraft.client.renderer.*;
-import net.minecraft.client.renderer.chunk.ChunkSectionsToRender;
+import net.minecraft.client.renderer.LevelRenderer;
+import net.minecraft.client.renderer.LevelTargetBundle;
 import net.minecraft.client.renderer.state.level.CameraRenderState;
-import org.joml.Matrix4f;
-import org.joml.Matrix4fc;
 import org.joml.Vector4f;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
@@ -32,29 +26,27 @@ public class MixinLevelRenderer {
 
     @Shadow @Final private LevelTargetBundle targets;
 
-    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;addAlwaysOnTopPass(Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;Lcom/mojang/blaze3d/buffers/GpuBufferSlice;)V", shift = At.Shift.BEFORE))
-    public void renderLevelPost(GraphicsResourceAllocator resourceAllocator, DeltaTracker deltaTracker, boolean renderOutline,
-        CameraRenderState cameraState, Matrix4fc modelViewMatrix, GpuBufferSlice terrainFog, Vector4f fogColor,
-        boolean shouldRenderSky, CallbackInfo ci, @Local FrameGraphBuilder frameGraphBuilder
+    @Inject(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/renderer/LevelRenderer;addMainPass(Lcom/mojang/blaze3d/framegraph/FrameGraphBuilder;Lnet/minecraft/client/renderer/feature/FeatureRenderDispatcher$PreparedFrame;Lcom/mojang/renderpearl/api/buffers/GpuBufferSlice;Lnet/minecraft/client/renderer/chunk/ChunkSectionsToRender;Z)V", shift = At.Shift.AFTER))
+    public void renderLevelPost(GraphicsResourceAllocator resourceAllocator, boolean renderOutline,
+        CameraRenderState cameraState, GpuBufferSlice terrainFog, Vector4f fogColor,
+        boolean shouldRenderSky, boolean bl2, CallbackInfo ci, @Local FrameGraphBuilder frameGraphBuilder
     ) {
         if (!Flashback.isInReplay()) {
             return;
         }
 
         FramePass framePass = frameGraphBuilder.addPass("flashback_mod_pass");
-        this.targets.main = framePass.readsAndWrites(this.targets.main);
-        if (this.targets.translucent != null) {
-            this.targets.translucent = framePass.readsAndWrites(this.targets.translucent);
+        if (this.targets.main != ResourceHandle.INVALID_HANDLE) {
+            this.targets.main = framePass.readsAndWrites(this.targets.main);
         }
-        if (this.targets.itemEntity != null) {
-            this.targets.itemEntity = framePass.readsAndWrites(this.targets.itemEntity);
+        if (this.targets.accumulate != null && this.targets.accumulate != ResourceHandle.INVALID_HANDLE) {
+            this.targets.accumulate = framePass.readsAndWrites(this.targets.accumulate);
         }
-        if (this.targets.particles != null) {
-            this.targets.particles = framePass.readsAndWrites(this.targets.particles);
-        }
+        this.targets.transmittance.replaceAll(handle ->
+            handle == ResourceHandle.INVALID_HANDLE ? handle : framePass.readsAndWrites(handle));
         framePass.executes(() -> {
             PoseStack poseStack = new PoseStack();
-            poseStack.mulPose(modelViewMatrix);
+            poseStack.mulPose(cameraState.viewRotationMatrix);
 
             // Set model view stack to identity
             var modelViewStack = RenderSystem.getModelViewStack();
