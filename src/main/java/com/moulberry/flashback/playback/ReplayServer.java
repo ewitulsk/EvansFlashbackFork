@@ -15,6 +15,7 @@ import com.moulberry.flashback.keyframe.Keyframe;
 import com.moulberry.flashback.keyframe.handler.ReplayServerKeyframeHandler;
 import com.moulberry.flashback.keyframe.impl.BlockOverrideKeyframe;
 import com.moulberry.flashback.keyframe.types.BlockOverrideKeyframeType;
+import com.moulberry.flashback.action.PositionAndAngle;
 import com.moulberry.flashback.packet.FlashbackAccurateEntityPosition;
 import com.moulberry.flashback.packet.FlashbackClearEntities;
 import com.moulberry.flashback.packet.FlashbackClearParticles;
@@ -84,6 +85,7 @@ import net.minecraft.world.BossEvent;
 import net.minecraft.world.clock.WorldClocks;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.ExperienceOrb;
+import net.minecraft.world.entity.InterpolationTracker;
 import net.minecraft.world.entity.PositionPath;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.player.Inventory;
@@ -183,6 +185,7 @@ public class ReplayServer extends IntegratedServer {
     private Component tabListHeader = Component.empty();
     private Component tabListFooter = Component.empty();
     private final Map<ResourceKey<Level>, IntSet> needsPositionUpdate = new HashMap<>();
+    private final IntSet entitiesWithAccuratePositions = new IntOpenHashSet();
 
     private Component shutdownReason = null;
     private FileSystem playbackFileSystem;
@@ -717,6 +720,7 @@ public class ReplayServer extends IntegratedServer {
         }
 
         var packet = FlashbackAccurateEntityPosition.STREAM_CODEC.decode(friendlyByteBuf);
+        this.entitiesWithAccuratePositions.add(packet.entityId());
 
         for (ReplayPlayer replayViewer : this.replayViewers) {
             ServerPlayNetworking.send(replayViewer, packet);
@@ -755,6 +759,20 @@ public class ReplayServer extends IntegratedServer {
                             entity.setYRot(yaw);
                             entity.setXRot(pitch);
                         } else {
+                            if (!this.entitiesWithAccuratePositions.contains(id)
+                                    && !Flashback.getConfig().advanced.disableIncreasedFirstPersonUpdates) {
+                                // Recordings without action/accurate_player_position_optional (e.g. server-side
+                                // recorders) leave the spectated entity stepping at 20Hz. Synthesize a
+                                // prev->curr sample pair so AccurateEntityPositionHandler interpolates.
+                                List<PositionAndAngle> samples = List.of(
+                                    new PositionAndAngle(entity.getX(), entity.getY(), entity.getZ(),
+                                        entity.getYRot(), entity.getXRot()),
+                                    new PositionAndAngle(x, y, z, yaw, pitch));
+                                FlashbackAccurateEntityPosition synthesized = new FlashbackAccurateEntityPosition(id, samples);
+                                for (ReplayPlayer replayViewer : this.replayViewers) {
+                                    ServerPlayNetworking.send(replayViewer, synthesized);
+                                }
+                            }
                             entity.snapTo(x, y, z, yaw, pitch);
                             updatePositionOfPassengers(entity);
                         }
@@ -1208,10 +1226,31 @@ public class ReplayServer extends IntegratedServer {
                         byte quantizedYRot = (byte) Mth.floor(serverEntity.entity.getYRot() * 256.0F / 360.0F);
                         byte quantizedXRot = (byte) Mth.floor(serverEntity.entity.getXRot() * 256.0F / 360.0F);
 
+                        InterpolationTracker interpolationTracker = serverEntity.entity.getInterpolation().interpolationTracker();
+                        interpolationTracker.updateTracking(trackingPosition);
+
                         if (!serverEntity.entity.isPassenger() && !serverEntity.positionCodec.getBase().equals(trackingPosition)) {
-                            trackedEntity.sendToTrackingPlayers(new ClientboundEntityPositionSyncPacket(serverEntity.entity.getId(),
-                                    PositionPath.of(trackingPosition), serverEntity.entity.getYRot(), serverEntity.entity.getXRot(),
-                                    serverEntity.wasOnGround));
+                            PositionPath positionPath = interpolationTracker.getPositionPath(trackingPosition);
+                            boolean rotChanged = quantizedYRot != serverEntity.lastSentYRot || quantizedXRot != serverEntity.lastSentXRot;
+                            // Encode a single linear delta rather than the stepped path: a stepped
+                            // VecDelta makes the client replay each step as a discrete hop, while a
+                            // linear delta rides the smooth lerp mechanism (matches pre-26.3 replays).
+                            VecDelta delta = serverEntity.positionCodec.tryEncode(trackingPosition);
+                            Packet<? super ClientGamePacketListener> packet;
+                            if (delta != null && !serverEntity.entity.getRequiresPrecisePosition()) {
+                                // Mirrors ServerEntity.createMovePacket: ordinary motion goes through
+                                // delta move packets, which the client lerps smoothly; full
+                                // PositionSync is reserved for teleports/precise-position entities.
+                                if (rotChanged) {
+                                    packet = new ClientboundMoveEntityPacket.PosRot(entityId, delta,
+                                        quantizedYRot, quantizedXRot, serverEntity.wasOnGround);
+                                } else {
+                                    packet = new ClientboundMoveEntityPacket.Pos(entityId, delta, serverEntity.wasOnGround);
+                                }
+                            } else {
+                                packet = ClientboundEntityPositionSyncPacket.of(serverEntity.entity, positionPath);
+                            }
+                            trackedEntity.sendToTrackingPlayers(packet);
                             serverEntity.positionCodec.setBase(trackingPosition);
                             serverEntity.lastSentYRot = quantizedYRot;
                             serverEntity.lastSentXRot = quantizedXRot;

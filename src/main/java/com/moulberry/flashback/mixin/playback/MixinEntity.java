@@ -8,6 +8,8 @@ import com.moulberry.flashback.state.EditorState;
 import com.moulberry.flashback.state.EditorStateManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.InterpolationHandler;
+import net.minecraft.world.entity.LinearInterpolationHandler;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.level.Level;
 import org.spongepowered.asm.mixin.Mixin;
@@ -40,6 +42,18 @@ public abstract class MixinEntity {
             return true; // Always pretend we're clientside so mounting players is allowed
         }
         return original.call(instance);
+    }
+
+    // In 26.3, entities that don't override createInterpolationHandler get InterpolationHandler.NO_OP,
+    // which turns every position packet into a hard setPos snap with no motion mechanism. Vanilla relies
+    // on client-side physics prediction for these, which doesn't exist for packet-driven replay entities.
+    // Give them a LinearInterpolationHandler so moveOrInterpolateTo glides over several ticks instead.
+    // Entities that override this method (e.g. LivingEntity -> SteppedInterpolationHandler) are unaffected.
+    @Inject(method = "createInterpolationHandler", at = @At("HEAD"), cancellable = true)
+    public void createInterpolationHandler(CallbackInfoReturnable<InterpolationHandler> cir) {
+        if (Flashback.isInReplay()) {
+            cir.setReturnValue(LinearInterpolationHandler.create((Entity) (Object) this));
+        }
     }
 
     @Inject(method = "isInvisibleTo", at = @At("HEAD"), cancellable = true)
